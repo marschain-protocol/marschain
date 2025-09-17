@@ -74,7 +74,8 @@ var (
 	maxSystemBalance = new(big.Int).Mul(big.NewInt(100), big.NewInt(params.Ether))
 
 	systemContracts = map[common.Address]bool{
-		common.HexToAddress(systemcontracts.ValidatorContract): true,
+		common.HexToAddress(systemcontracts.ValidatorContract):    true,
+		common.HexToAddress(systemcontracts.DistributionContract): true,
 	}
 )
 
