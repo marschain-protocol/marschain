@@ -29,7 +29,7 @@ func (p *Deimos) delayForRamanujanFork(snap *Snapshot, header *types.Header) tim
 func (p *Deimos) blockTimeForRamanujanFork(snap *Snapshot, header, parent *types.Header) uint64 {
 	blockTime := parent.Time + p.config.Period
 	if p.chainConfig.IsRamanujan(header.Number) {
-		blockTime = blockTime + p.backOffTime(snap, header, p.val)
+		blockTime = blockTime + p.backOffTime(snap, header, p.signerAddress)
 	}
 	return blockTime
 }

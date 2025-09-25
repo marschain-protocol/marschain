@@ -199,9 +199,9 @@ type Deimos struct {
 
 	signer types.Signer
 
-	val      common.Address // Ethereum address of the signing key
-	signFn   SignerFn       // Signer function to authorize hashes with
-	signTxFn SignerTxFn
+	signerAddress common.Address // Ethereum address of the signing key
+	signFn        SignerFn       // Signer function to authorize hashes with
+	signTxFn      SignerTxFn
 
 	lock sync.RWMutex // Protects the signer fields
 
@@ -594,7 +594,7 @@ func (p *Deimos) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
 func (p *Deimos) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
-	header.Coinbase = p.val
+	header.Coinbase = p.signerAddress
 	header.Nonce = types.BlockNonce{}
 
 	number := header.Number.Uint64()
@@ -604,7 +604,7 @@ func (p *Deimos) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	}
 
 	// Set the correct difficulty
-	header.Difficulty = CalcDifficulty(snap, p.val)
+	header.Difficulty = CalcDifficulty(snap, p.signerAddress)
 
 	// Ensure the extra data has all it's components
 	if len(header.Extra) < extraVanity-nextForkHashSize {
@@ -644,8 +644,8 @@ func (p *Deimos) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	return nil
 }
 
-// Finalize implements consensus.Engine, ensuring no uncles are set, nor block
-// rewards given.
+// Finalize implements consensus.Engine, ensuring no uncles are set, deimos will give block rewards
+// This method finalizes the block getting from other validators
 func (p *Deimos) Finalize(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, txs *[]*types.Transaction,
 	uncles []*types.Header, receipts *[]*types.Receipt, systemTxs *[]*types.Transaction, usedGas *uint64) error {
 	// warn if not in majority fork
@@ -686,7 +686,8 @@ func (p *Deimos) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 		}
 	}
 	val := header.Coinbase
-	err = p.distributeIncoming(val, state, header, cx, txs, receipts, systemTxs, usedGas, false)
+	var _ common.Address = val
+	err = p.accumulateRewards(state, header)
 	if err != nil {
 		return err
 	}
@@ -698,7 +699,8 @@ func (p *Deimos) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 }
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
-// nor block rewards given, and returns the final block.
+// deimos will give block rewards, and returns the final block.
+// This method finalizes and assembles the block while mining within this validator
 func (p *Deimos) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB,
 	txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, []*types.Receipt, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
@@ -715,7 +717,11 @@ func (p *Deimos) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 			log.Error("init contract failed")
 		}
 	}
-	err := p.distributeIncoming(p.val, state, header, cx, &txs, &receipts, nil, &header.GasUsed, true)
+	err := func() error {
+		var val common.Address = p.signerAddress
+		var _ common.Address = val
+		return p.accumulateRewards(state, header)
+	}()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -748,7 +754,7 @@ func (p *Deimos) Authorize(val common.Address, signFn SignerFn, signTxFn SignerT
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	p.val = val
+	p.signerAddress = val
 	p.signFn = signFn
 	p.signTxFn = signTxFn
 }
@@ -781,7 +787,7 @@ func (p *Deimos) Delay(chain consensus.ChainReader, header *types.Header, leftOv
 }
 
 // Seal implements consensus.Engine, attempting to create a sealed block using
-// the local signing credentials.
+// the local signing credentials following the finalizeAndAssemble.
 func (p *Deimos) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
 	header := block.Header()
 
@@ -797,7 +803,7 @@ func (p *Deimos) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	}
 	// Don't hold the val fields for the entire sealing procedure
 	p.lock.RLock()
-	val, signFn := p.val, p.signFn
+	val, signFn := p.signerAddress, p.signFn
 	p.lock.RUnlock()
 
 	snap, err := p.snapshot(chain, number-1, header.ParentHash, nil)
@@ -887,7 +893,7 @@ func (p *Deimos) EnoughDistance(chain consensus.ChainReader, header *types.Heade
 	if err != nil {
 		return true
 	}
-	return snap.enoughDistance(p.val, header)
+	return snap.enoughDistance(p.signerAddress, header)
 }
 
 func (p *Deimos) AllowLightProcess(chain consensus.ChainReader, currentHeader *types.Header) bool {
@@ -896,13 +902,13 @@ func (p *Deimos) AllowLightProcess(chain consensus.ChainReader, currentHeader *t
 		return true
 	}
 
-	idx := snap.indexOfVal(p.val)
+	idx := snap.indexOfVal(p.signerAddress)
 	// validator is not allowed to diff sync
 	return idx < 0
 }
 
 func (p *Deimos) IsLocalBlock(header *types.Header) bool {
-	return p.val == header.Coinbase
+	return p.signerAddress == header.Coinbase
 }
 
 func (p *Deimos) SignRecently(chain consensus.ChainReader, parent *types.Block) (bool, error) {
@@ -912,14 +918,14 @@ func (p *Deimos) SignRecently(chain consensus.ChainReader, parent *types.Block) 
 	}
 
 	// Bail out if we're unauthorized to sign a block
-	if _, authorized := snap.Validators[p.val]; !authorized {
+	if _, authorized := snap.Validators[p.signerAddress]; !authorized {
 		return true, errUnauthorizedValidator
 	}
 
 	// If we're amongst the recent signers, wait for the next block
 	number := parent.NumberU64() + 1
 	for seen, recent := range snap.Recents {
-		if recent == p.val {
+		if recent == p.signerAddress {
 			// Signer is among recents, only wait if the current block doesn't shift it out
 			if limit := uint64(len(snap.Validators)/2 + 1); number < limit || seen > number-limit {
 				return true, nil
@@ -937,7 +943,7 @@ func (p *Deimos) CalcDifficulty(chain consensus.ChainHeaderReader, time uint64, 
 	if err != nil {
 		return nil
 	}
-	return CalcDifficulty(snap, p.val)
+	return CalcDifficulty(snap, p.signerAddress)
 }
 
 // CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
@@ -1021,18 +1027,9 @@ func (p *Deimos) getCurrentValidators(blockHash common.Hash, blockNumber *big.In
 	return valz, nil
 }
 
-// get mining reward for all validators
-func (p *Deimos) distributeIncoming(val common.Address, state *state.StateDB, header *types.Header, chain core.ChainContext,
-	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
-	coinbase := header.Coinbase
-	//get gas fees from SystemAddress
-	balance := state.GetBalance(consensus.SystemAddress)
-	if balance.Cmp(common.Big0) <= 0 {
-		return nil
-	}
-	state.SetBalance(consensus.SystemAddress, big.NewInt(0))
-	state.AddBalance(coinbase, balance)
-
+// get mining reward for DistributionContract and collect gas fee from SystemAddress
+func (p *Deimos) accumulateRewards(state *state.StateDB, header *types.Header) error {
+	coinbase := common.HexToAddress(systemcontracts.DistributionContract)
 	// marschain mining reward calculation:
 	// max cap is 200,000,000,000, halving every 28800 * 448 blocks (about 1.5 years)
 	// before first halving, the total reward is 100,000,000,000, 7750496031750000000000 wei per block
@@ -1042,7 +1039,16 @@ func (p *Deimos) distributeIncoming(val common.Address, state *state.StateDB, he
 	baseRewardPerBlock, _ := new(big.Int).SetString(baseRewardPerBlockString, 10)
 	miningReward := new(big.Int).Div(baseRewardPerBlock, new(big.Int).Exp(big.NewInt(2), big.NewInt(int64(halvingCount)), nil))
 	state.AddBalance(coinbase, miningReward)
-	log.Info("Mining reward", "val", coinbase.Hex(), "reward", miningReward.String())
+	log.Info("Mining reward", "block Number", header.Number.String(), "from validator", header.Coinbase.Hex(), "turn", header.Difficulty.String(), "reward", miningReward.String(),
+		"coinbase value", state.GetBalance(coinbase))
+
+	//get gas fees from SystemAddress
+	balance := state.GetBalance(consensus.SystemAddress)
+	if balance.Cmp(common.Big0) <= 0 {
+		return nil
+	}
+	state.SetBalance(consensus.SystemAddress, big.NewInt(0))
+	state.AddBalance(coinbase, balance)
 
 	return nil
 }
@@ -1100,7 +1106,7 @@ func (p *Deimos) applyTransaction(
 	expectedTx := types.NewTransaction(nonce, *msg.To(), msg.Value(), msg.Gas(), msg.GasPrice(), msg.Data())
 	expectedHash := p.signer.Hash(expectedTx)
 
-	if msg.From() == p.val && mining {
+	if msg.From() == p.signerAddress && mining {
 		expectedTx, err = p.signTxFn(accounts.Account{Address: msg.From()}, expectedTx, p.chainConfig.ChainID)
 		if err != nil {
 			return err
