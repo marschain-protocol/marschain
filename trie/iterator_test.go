@@ -25,8 +25,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/ethdb/memorydb"
+	"github.com/ethereum/go-ethereum/marsdb"
+	"github.com/ethereum/go-ethereum/marsdb/memorydb"
 )
 
 func TestEmptyIterator(t *testing.T) {
@@ -459,7 +459,7 @@ func checkIteratorNoDups(t *testing.T, it NodeIterator, seen map[string]bool) in
 
 type loggingDb struct {
 	getCount uint64
-	backend  ethdb.KeyValueStore
+	backend  marsdb.KeyValueStore
 }
 
 func (l *loggingDb) Has(key []byte) (bool, error) {
@@ -479,15 +479,15 @@ func (l *loggingDb) Delete(key []byte) error {
 	return l.backend.Delete(key)
 }
 
-func (l *loggingDb) NewBatch() ethdb.Batch {
+func (l *loggingDb) NewBatch() marsdb.Batch {
 	return l.backend.NewBatch()
 }
 
-func (l *loggingDb) NewBatchWithSize(size int) ethdb.Batch {
+func (l *loggingDb) NewBatchWithSize(size int) marsdb.Batch {
 	return l.backend.NewBatchWithSize(size)
 }
 
-func (l *loggingDb) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
+func (l *loggingDb) NewIterator(prefix []byte, start []byte) marsdb.Iterator {
 	fmt.Printf("NewIterator\n")
 	return l.backend.NewIterator(prefix, start)
 }

@@ -26,7 +26,7 @@ import (
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/marsdb"
 	"github.com/ethereum/go-ethereum/log"
 )
 
@@ -38,7 +38,7 @@ var stPool = sync.Pool{
 	},
 }
 
-func stackTrieFromPool(db ethdb.KeyValueWriter) *StackTrie {
+func stackTrieFromPool(db marsdb.KeyValueWriter) *StackTrie {
 	st := stPool.Get().(*StackTrie)
 	st.db = db
 	return st
@@ -53,15 +53,15 @@ func returnToPool(st *StackTrie) {
 // in order. Once it determines that a subtree will no longer be inserted
 // into, it will hash it and free up the memory it uses.
 type StackTrie struct {
-	nodeType uint8                // node type (as in branch, ext, leaf)
-	val      []byte               // value contained by this node if it's a leaf
-	key      []byte               // key chunk covered by this (leaf|ext) node
-	children [16]*StackTrie       // list of children (for branch and exts)
-	db       ethdb.KeyValueWriter // Pointer to the commit db, can be nil
+	nodeType uint8                 // node type (as in branch, ext, leaf)
+	val      []byte                // value contained by this node if it's a leaf
+	key      []byte                // key chunk covered by this (leaf|ext) node
+	children [16]*StackTrie        // list of children (for branch and exts)
+	db       marsdb.KeyValueWriter // Pointer to the commit db, can be nil
 }
 
 // NewStackTrie allocates and initializes an empty trie.
-func NewStackTrie(db ethdb.KeyValueWriter) *StackTrie {
+func NewStackTrie(db marsdb.KeyValueWriter) *StackTrie {
 	return &StackTrie{
 		nodeType: emptyNode,
 		db:       db,
@@ -69,7 +69,7 @@ func NewStackTrie(db ethdb.KeyValueWriter) *StackTrie {
 }
 
 // NewFromBinary initialises a serialized stacktrie with the given db.
-func NewFromBinary(data []byte, db ethdb.KeyValueWriter) (*StackTrie, error) {
+func NewFromBinary(data []byte, db marsdb.KeyValueWriter) (*StackTrie, error) {
 	var st StackTrie
 	if err := st.UnmarshalBinary(data); err != nil {
 		return nil, err
@@ -145,7 +145,7 @@ func (st *StackTrie) unmarshalBinary(r io.Reader) error {
 	return nil
 }
 
-func (st *StackTrie) setDb(db ethdb.KeyValueWriter) {
+func (st *StackTrie) setDb(db marsdb.KeyValueWriter) {
 	st.db = db
 	for _, child := range st.children {
 		if child != nil {
@@ -154,7 +154,7 @@ func (st *StackTrie) setDb(db ethdb.KeyValueWriter) {
 	}
 }
 
-func newLeaf(key, val []byte, db ethdb.KeyValueWriter) *StackTrie {
+func newLeaf(key, val []byte, db marsdb.KeyValueWriter) *StackTrie {
 	st := stackTrieFromPool(db)
 	st.nodeType = leafNode
 	st.key = append(st.key, key...)
@@ -162,7 +162,7 @@ func newLeaf(key, val []byte, db ethdb.KeyValueWriter) *StackTrie {
 	return st
 }
 
-func newExt(key []byte, child *StackTrie, db ethdb.KeyValueWriter) *StackTrie {
+func newExt(key []byte, child *StackTrie, db marsdb.KeyValueWriter) *StackTrie {
 	st := stackTrieFromPool(db)
 	st.nodeType = extNode
 	st.key = append(st.key, key...)
