@@ -28,7 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/marsdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
@@ -58,9 +58,9 @@ type TxPool struct {
 	chainHeadSub event.Subscription
 	mu           sync.RWMutex
 	chain        *LightChain
-	odr          OdrBackend
-	chainDb      ethdb.Database
-	relay        TxRelayBackend
+	odr     OdrBackend
+	chainDb marsdb.Database
+	relay   TxRelayBackend
 	head         common.Hash
 	nonce        map[common.Address]uint64            // "pending" nonce
 	pending      map[common.Hash]*types.Transaction   // pending transactions by tx hash
