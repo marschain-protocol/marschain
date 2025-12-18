@@ -30,8 +30,8 @@ import (
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/mars/filters"
 	"github.com/ethereum/go-ethereum/internal/ethapi"
+	"github.com/ethereum/go-ethereum/mars/filters"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
@@ -1052,8 +1052,8 @@ func (p *Pending) Call(ctx context.Context, args struct {
 func (p *Pending) EstimateGas(ctx context.Context, args struct {
 	Data ethapi.TransactionArgs
 }) (Long, error) {
-	pendingBlockNr := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
-	gas, err := ethapi.DoEstimateGas(ctx, p.backend, args.Data, pendingBlockNr, p.backend.RPCGasCap())
+	latestBlockNr := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	gas, err := ethapi.DoEstimateGas(ctx, p.backend, args.Data, latestBlockNr, p.backend.RPCGasCap())
 	return Long(gas), err
 }
 

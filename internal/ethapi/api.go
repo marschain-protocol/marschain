@@ -43,8 +43,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/mars/tracers/logger"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/mars/tracers/logger"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -1121,7 +1121,7 @@ func DoEstimateGas(ctx context.Context, b Backend, args TransactionArgs, blockNr
 // EstimateGas returns an estimate of the amount of gas needed to execute the
 // given transaction against the current pending block.
 func (s *PublicBlockChainAPI) EstimateGas(ctx context.Context, args TransactionArgs, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Uint64, error) {
-	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 	if blockNrOrHash != nil {
 		bNrOrHash = *blockNrOrHash
 	}
@@ -1273,7 +1273,7 @@ func (s *PublicBlockChainAPI) replay(ctx context.Context, block *types.Block, ac
 				balance := statedb.GetBalance(consensus.SystemAddress)
 				if balance.Cmp(common.Big0) > 0 {
 					statedb.SetBalance(consensus.SystemAddress, big.NewInt(0))
-					statedb.AddBalance(block.Header().Coinbase, balance)
+					statedb.AddBalance(consensus.DistributionAddress, balance)
 				}
 			}
 		}
