@@ -426,3 +426,14 @@ const validatorSetABI = `[
 		"type": "function"
 	}
 ]`
+
+const distributionABI = `[
+	{
+		"inputs": [],
+		"name": "init",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	}
+	
+]`

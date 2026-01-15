@@ -31,10 +31,10 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/ethdb/leveldb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/marsdb"
+	"github.com/ethereum/go-ethereum/marsdb/leveldb"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/rpc"
 )
@@ -45,7 +45,8 @@ type Node struct {
 	config        *Config
 	accman        *accounts.Manager
 	log           log.Logger
-	ephemKeystore string            // if non-empty, the key directory that will be removed by Stop
+	keyDir        string            // key store directory
+	keyDirTemp    bool              // If true, key directory will be removed by Stop
 	dirLock       fileutil.Releaser // prevents concurrent use of instance directory
 	stop          chan struct{}     // Channel to wait for termination notifications
 	server        *p2p.Server       // Currently running P2P networking layer
@@ -85,13 +86,25 @@ func New(conf *Config) (*Node, error) {
 		conf.DataDir = absdatadir
 	}
 	if conf.LogConfig != nil {
-		logFilePath := ""
-		if conf.LogConfig.FileRoot == "" {
-			logFilePath = path.Join(conf.DataDir, conf.LogConfig.FilePath)
-		} else {
-			logFilePath = path.Join(conf.LogConfig.FileRoot, conf.LogConfig.FilePath)
+		if conf.LogConfig.TermTimeFormat != nil && *conf.LogConfig.TermTimeFormat != "" {
+			log.SetTermTimeFormat(*conf.LogConfig.TermTimeFormat)
 		}
-		log.Root().SetHandler(log.NewFileLvlHandler(logFilePath, conf.LogConfig.MaxBytesSize, conf.LogConfig.Level))
+
+		if conf.LogConfig.TimeFormat != nil && *conf.LogConfig.TimeFormat != "" {
+			log.SetTimeFormat(*conf.LogConfig.TimeFormat)
+		}
+
+		if conf.LogConfig.FileRoot != nil && conf.LogConfig.FilePath != nil &&
+			conf.LogConfig.MaxBytesSize != nil && conf.LogConfig.Level != nil {
+			// log to file
+			logFilePath := ""
+			if *conf.LogConfig.FileRoot == "" {
+				logFilePath = path.Join(conf.DataDir, *conf.LogConfig.FilePath)
+			} else {
+				logFilePath = path.Join(*conf.LogConfig.FileRoot, *conf.LogConfig.FilePath)
+			}
+			log.Root().SetHandler(log.NewFileLvlHandler(logFilePath, *conf.LogConfig.MaxBytesSize, *conf.LogConfig.Level))
+		}
 	}
 	if conf.Logger == nil {
 		conf.Logger = log.New()
@@ -126,14 +139,15 @@ func New(conf *Config) (*Node, error) {
 	if err := node.openDataDir(); err != nil {
 		return nil, err
 	}
-	// Ensure that the AccountManager method works before the node has started. We rely on
-	// this in cmd/geth.
-	am, ephemeralKeystore, err := makeAccountManager(conf)
+	keyDir, isEphem, err := getKeyStoreDir(conf)
 	if err != nil {
 		return nil, err
 	}
-	node.accman = am
-	node.ephemKeystore = ephemeralKeystore
+	node.keyDir = keyDir
+	node.keyDirTemp = isEphem
+	// Creates an empty AccountManager with no backends. Callers (e.g. cmd/geth)
+	// are required to add the backends later on.
+	node.accman = accounts.NewManager(&accounts.Config{InsecureUnlockAllowed: conf.InsecureUnlockAllowed})
 
 	// Initialize the p2p server. This creates the node key and discovery databases.
 	node.server.Config.PrivateKey = node.config.NodeKey()
@@ -247,8 +261,8 @@ func (n *Node) doClose(errs []error) error {
 	if err := n.accman.Close(); err != nil {
 		errs = append(errs, err)
 	}
-	if n.ephemKeystore != "" {
-		if err := os.RemoveAll(n.ephemKeystore); err != nil {
+	if n.keyDirTemp {
+		if err := os.RemoveAll(n.keyDir); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -528,6 +542,11 @@ func (n *Node) InstanceDir() string {
 	return n.config.instanceDir()
 }
 
+// KeyStoreDir retrieves the key directory
+func (n *Node) KeyStoreDir() string {
+	return n.keyDir
+}
+
 // AccountManager retrieves the account manager used by the protocol stack.
 func (n *Node) AccountManager() *accounts.Manager {
 	return n.accman
@@ -561,14 +580,14 @@ func (n *Node) EventMux() *event.TypeMux {
 // OpenDatabase opens an existing database with the given name (or creates one if no
 // previous can be found) from within the node's instance directory. If the node is
 // ephemeral, a memory database is returned.
-func (n *Node) OpenDatabase(name string, cache, handles int, namespace string, readonly bool) (ethdb.Database, error) {
+func (n *Node) OpenDatabase(name string, cache, handles int, namespace string, readonly bool) (marsdb.Database, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 	if n.state == closedState {
 		return nil, ErrNodeStopped
 	}
 
-	var db ethdb.Database
+	var db marsdb.Database
 	var err error
 	if n.config.DataDir == "" {
 		db = rawdb.NewMemoryDatabase()
@@ -582,12 +601,12 @@ func (n *Node) OpenDatabase(name string, cache, handles int, namespace string, r
 	return db, err
 }
 
-func (n *Node) OpenAndMergeDatabase(name string, cache, handles int, freezer, diff, namespace string, readonly, persistDiff bool) (ethdb.Database, error) {
+func (n *Node) OpenAndMergeDatabase(name string, cache, handles int, freezer, diff, namespace string, readonly, persistDiff, pruneAncientData bool) (marsdb.Database, error) {
 	chainDataHandles := handles
 	if persistDiff {
 		chainDataHandles = handles * chainDataHandlesPercentage / 100
 	}
-	chainDB, err := n.OpenDatabaseWithFreezer(name, cache, chainDataHandles, freezer, namespace, readonly, false, false)
+	chainDB, err := n.OpenDatabaseWithFreezer(name, cache, chainDataHandles, freezer, namespace, readonly, false, false, pruneAncientData, false)
 	if err != nil {
 		return nil, err
 	}
@@ -607,14 +626,14 @@ func (n *Node) OpenAndMergeDatabase(name string, cache, handles int, freezer, di
 // also attaching a chain freezer to it that moves ancient chain data from the
 // database to immutable append-only files. If the node is an ephemeral one, a
 // memory database is returned.
-func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, freezer, namespace string, readonly, disableFreeze, isLastOffset bool) (ethdb.Database, error) {
+func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, freezer, namespace string, readonly, disableFreeze, isLastOffset, pruneAncientData, skipCheckFreezerType bool) (marsdb.Database, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 	if n.state == closedState {
 		return nil, ErrNodeStopped
 	}
 
-	var db ethdb.Database
+	var db marsdb.Database
 	var err error
 	if n.config.DataDir == "" {
 		db = rawdb.NewMemoryDatabase()
@@ -626,7 +645,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, freezer,
 		case !filepath.IsAbs(freezer):
 			freezer = n.ResolvePath(freezer)
 		}
-		db, err = rawdb.NewLevelDBDatabaseWithFreezer(root, cache, handles, freezer, namespace, readonly, disableFreeze, isLastOffset)
+		db, err = rawdb.NewLevelDBDatabaseWithFreezer(root, cache, handles, freezer, namespace, readonly, disableFreeze, isLastOffset, pruneAncientData, skipCheckFreezerType)
 	}
 
 	if err == nil {
@@ -668,7 +687,7 @@ func (n *Node) ResolvePath(x string) string {
 // service, the wrapper removes it from the node's database map. This ensures that Node
 // won't auto-close the database if it is closed by the service that opened it.
 type closeTrackingDB struct {
-	ethdb.Database
+	marsdb.Database
 	n *Node
 }
 
@@ -680,7 +699,7 @@ func (db *closeTrackingDB) Close() error {
 }
 
 // wrapDatabase ensures the database will be auto-closed when Node is closed.
-func (n *Node) wrapDatabase(db ethdb.Database) ethdb.Database {
+func (n *Node) wrapDatabase(db marsdb.Database) marsdb.Database {
 	wrapper := &closeTrackingDB{db, n}
 	n.databases[wrapper] = struct{}{}
 	return wrapper

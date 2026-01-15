@@ -59,8 +59,6 @@ const (
 	initialBackOffTime   = uint64(1) // second
 	processBackOffTime   = uint64(1) // second
 
-	systemRewardPercent = 4 // it means 1/2^4 = 1/16 percentage of gas fee incoming will be distributed to system
-
 	baseRewardPerBlockString = "7750496031750000000000" // Marschain reward per block before first halving
 	halvingBlock             = int64(28800 * 448)       // Marschain reward halving every 448 days, 28800 blocks per day
 
@@ -70,8 +68,6 @@ var (
 	uncleHash  = types.CalcUncleHash(nil) // Always Keccak256(RLP([])) as uncles are meaningless outside of PoW.
 	diffInTurn = big.NewInt(2)            // Block difficulty for in-turn signatures
 	diffNoTurn = big.NewInt(1)            // Block difficulty for out-of-turn signatures
-	// 100 native token
-	maxSystemBalance = new(big.Int).Mul(big.NewInt(100), big.NewInt(params.Ether))
 
 	systemContracts = map[common.Address]bool{
 		common.HexToAddress(systemcontracts.ValidatorContract):    true,
@@ -207,6 +203,7 @@ type Deimos struct {
 
 	ethAPI          *ethapi.PublicBlockChainAPI
 	validatorSetABI abi.ABI
+	distributionABI abi.ABI
 
 	// The fields below are for testing only
 	fakeDiff bool // Skip difficulty verifications
@@ -240,6 +237,7 @@ func New(
 	if err != nil {
 		panic(err)
 	}
+	dABI, err := abi.JSON(strings.NewReader(distributionABI))
 	if err != nil {
 		panic(err)
 	}
@@ -252,6 +250,7 @@ func New(
 		recentSnaps:     recentSnaps,
 		signatures:      signatures,
 		validatorSetABI: vABI,
+		distributionABI: dABI,
 		signer:          types.NewEIP155Signer(chainConfig.ChainID),
 	}
 
@@ -679,6 +678,7 @@ func (p *Deimos) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 	}
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	cx := chainContext{Chain: chain, deimos: p}
+	// initialize system contracts at block 1
 	if header.Number.Cmp(common.Big1) == 0 {
 		err := p.initContract(state, header, cx, txs, receipts, systemTxs, usedGas, false)
 		if err != nil {
@@ -1029,7 +1029,7 @@ func (p *Deimos) getCurrentValidators(blockHash common.Hash, blockNumber *big.In
 
 // get mining reward for DistributionContract and collect gas fee from SystemAddress
 func (p *Deimos) accumulateRewards(state *state.StateDB, header *types.Header) error {
-	coinbase := common.HexToAddress(systemcontracts.DistributionContract)
+	coinbase := consensus.DistributionAddress
 	// marschain mining reward calculation:
 	// max cap is 200,000,000,000, halving every 28800 * 448 blocks (about 1.5 years)
 	// before first halving, the total reward is 100,000,000,000, 7750496031750000000000 wei per block
@@ -1056,27 +1056,38 @@ func (p *Deimos) accumulateRewards(state *state.StateDB, header *types.Header) e
 // init contract
 func (p *Deimos) initContract(state *state.StateDB, header *types.Header, chain core.ChainContext,
 	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
-	// method
+	// 1. init validator contract
 	method := "init"
-	// contracts
-	contracts := []string{
-		systemcontracts.ValidatorContract,
-	}
-	// get packed data
 	data, err := p.validatorSetABI.Pack(method)
 	if err != nil {
 		log.Error("Unable to pack tx for init validator set", "error", err)
 		return err
 	}
-	for _, c := range contracts {
-		msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(c), data, common.Big0)
-		// apply message
-		log.Trace("init contract", "block hash", header.Hash(), "contract", c)
-		err = p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
-		if err != nil {
-			return err
-		}
+	c := systemcontracts.ValidatorContract
+	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(c), data, common.Big0)
+	// apply message
+	log.Info("init validator contract", "block hash", header.Hash(), "contract", c)
+	err = p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
+	if err != nil {
+		return err
 	}
+
+	// 2. init distribution contract
+	// method = "init"
+	// data, err = p.distributionABI.Pack(method)
+	// if err != nil {
+	// 	log.Error("Unable to pack tx for initialize distribution contract", "error", err)
+	// 	return err
+	// }
+	// c = systemcontracts.DistributionContract
+	// msg = p.getSystemMessage(header.Coinbase, common.HexToAddress(c), data, common.Big0)
+	// // apply message
+	// log.Info("init distribution contract", "block hash", header.Hash(), "contract", c)
+	// err = p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
+	// if err != nil {
+	// 	return err
+	// }
+
 	return nil
 }
 

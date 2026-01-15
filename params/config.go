@@ -116,7 +116,7 @@ var (
 		GibbsBlock:          big.NewInt(23846001),
 		PlanckBlock:         big.NewInt(27281024),
 
-		Parlia: &ParliaConfig{
+		Deimos: &DeimosConfig{
 			Period: 3,
 			Epoch:  200,
 		},
@@ -142,7 +142,7 @@ var (
 		NanoBlock:           big.NewInt(23482428),
 		MoranBlock:          big.NewInt(23603940),
 		PlanckBlock:         big.NewInt(28196022),
-		Parlia: &ParliaConfig{
+		Deimos: &DeimosConfig{
 			Period: 3,
 			Epoch:  200,
 		},
@@ -169,7 +169,7 @@ var (
 		MoranBlock:          nil,
 		PlanckBlock:         nil,
 
-		Parlia: &ParliaConfig{
+		Deimos: &DeimosConfig{
 			Period: 3,
 			Epoch:  200,
 		},
@@ -290,7 +290,7 @@ type ChainConfig struct {
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty" toml:",omitempty"`
 	Clique *CliqueConfig `json:"clique,omitempty" toml:",omitempty"`
-	Parlia *ParliaConfig `json:"parlia,omitempty" toml:",omitempty"`
+	Deimos *DeimosConfig `json:"deimos,omitempty" toml:",omitempty"`
 }
 
 // EthashConfig is the consensus engine configs for proof-of-work based sealing.
@@ -312,15 +312,15 @@ func (c *CliqueConfig) String() string {
 	return "clique"
 }
 
-// ParliaConfig is the consensus engine configs for proof-of-staked-authority based sealing.
-type ParliaConfig struct {
+// DeimosConfig is the consensus engine configs for proof-of-staked-authority based sealing.
+type DeimosConfig struct {
 	Period uint64 `json:"period"` // Number of seconds between blocks to enforce
 	Epoch  uint64 `json:"epoch"`  // Epoch length to update validatorSet
 }
 
 // String implements the stringer interface, returning the consensus engine details.
-func (b *ParliaConfig) String() string {
-	return "parlia"
+func (b *DeimosConfig) String() string {
+	return "deimos"
 }
 
 // String implements the fmt.Stringer interface.
@@ -331,8 +331,8 @@ func (c *ChainConfig) String() string {
 		engine = c.Ethash
 	case c.Clique != nil:
 		engine = c.Clique
-	case c.Parlia != nil:
-		engine = c.Parlia
+	case c.Deimos != nil:
+		engine = c.Deimos
 	default:
 		engine = "unknown"
 	}
