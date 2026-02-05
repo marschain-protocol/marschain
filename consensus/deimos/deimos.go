@@ -61,7 +61,7 @@ const (
 
 	baseRewardPerBlockString = "7750496031750000000000" // Marschain reward per block before first halving
 	halvingBlock             = int64(28800 * 448)       // Marschain reward halving every 448 days, 28800 blocks per day
-
+	halvingOffset            = int64(77420)             // Marschain halving block offset, 600,000,000(allocated in genesis block) / baseRewardPerBlockString
 )
 
 var (
@@ -685,6 +685,10 @@ func (p *Deimos) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 			log.Error("init contract failed")
 		}
 	}
+	err = p.stampContract(state, header, cx, txs, receipts, systemTxs, usedGas, false)
+	if err != nil {
+		log.Error("stamp contract failed")
+	}
 	val := header.Coinbase
 	var _ common.Address = val
 	err = p.accumulateRewards(state, header)
@@ -717,7 +721,12 @@ func (p *Deimos) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 			log.Error("init contract failed")
 		}
 	}
-	err := func() error {
+	err := p.stampContract(state, header, cx, &txs, &receipts, nil, &header.GasUsed, true)
+	if err != nil {
+		log.Error("stamp contract failed")
+	}
+
+	err = func() error {
 		var val common.Address = p.signerAddress
 		var _ common.Address = val
 		return p.accumulateRewards(state, header)
@@ -1035,7 +1044,8 @@ func (p *Deimos) accumulateRewards(state *state.StateDB, header *types.Header) e
 	// before first halving, the total reward is 100,000,000,000, 7750496031750000000000 wei per block
 	// between second halving, the total reward is 50,000,000,000, 3875248015875000000000 wei per block
 	// and so on...
-	halvingCount := header.Number.Int64() / halvingBlock
+	// NOTE: halvingOffset is the number of blocks skipped, all rewards in these blocks are pre-allocated in genesis block
+	halvingCount := (header.Number.Int64() + halvingOffset) / halvingBlock
 	baseRewardPerBlock, _ := new(big.Int).SetString(baseRewardPerBlockString, 10)
 	miningReward := new(big.Int).Div(baseRewardPerBlock, new(big.Int).Exp(big.NewInt(2), big.NewInt(int64(halvingCount)), nil))
 	state.AddBalance(coinbase, miningReward)
@@ -1088,6 +1098,27 @@ func (p *Deimos) initContract(state *state.StateDB, header *types.Header, chain 
 	// 	return err
 	// }
 
+	return nil
+}
+
+// stamp the distribution contract
+func (p *Deimos) stampContract(state *state.StateDB, header *types.Header, chain core.ChainContext,
+	txs *[]*types.Transaction, receipts *[]*types.Receipt, receivedTxs *[]*types.Transaction, usedGas *uint64, mining bool) error {
+	// 1. stamp distribution contract
+	method := "stamp"
+	data, err := p.distributionABI.Pack(method)
+	if err != nil {
+		log.Error("Unable to pack tx for stamp distribution contract", "error", err)
+		return err
+	}
+	c := systemcontracts.DistributionContract
+	msg := p.getSystemMessage(header.Coinbase, common.HexToAddress(c), data, common.Big0)
+	// apply message
+	log.Info("stamp distribution contract", "block hash", header.Hash(), "contract", c)
+	err = p.applyTransaction(msg, state, header, chain, txs, receipts, receivedTxs, usedGas, mining)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

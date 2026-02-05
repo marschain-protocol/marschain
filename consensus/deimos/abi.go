@@ -434,6 +434,13 @@ const distributionABI = `[
 		"outputs": [],
 		"stateMutability": "nonpayable",
 		"type": "function"
-	}
+	},
+	{
+		"inputs": [],
+		"name": "stamp",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+    }
 	
 ]`

@@ -11,25 +11,28 @@ import (
 
 // Testing marschain reward halving at different block heights
 func TestRewardHalving(t *testing.T) {
+	baseRewardPerBlockString := "7750496031750000000000"
+	halvingBlock := int64(28800 * 448)
+	halvingOffset := int64(77420)
+
 	testCases := []struct {
 		height int64
 	}{
 		{1},
 		{28800},
-		{28800*448 - 1},
-		{28800 * 448},
-		{28800*448 + 1},
-		{28800*448*2 - 1},
-		{28800 * 448 * 2},
-		{28800*448*2 + 1},
-		{28800 * 448 * 3},
-		{28800 * 448 * 4},
-		{28800 * 448 * 5},
+		{28800*448 - halvingOffset - 1},
+		{28800*448 - halvingOffset},
+		{28800*448 - halvingOffset + 1},
+		{28800*448*2 - halvingOffset - 1},
+		{28800*448*2 - halvingOffset},
+		{28800*448*2 - halvingOffset + 1},
+		{28800*448*3 - halvingOffset},
+		{28800*448*4 - halvingOffset},
+		{28800*448*5 - halvingOffset},
 	}
-	baseRewardPerBlockString := "7750496031750000000000"
-	halvingBlock := int64(28800 * 448)
+
 	for _, tc := range testCases {
-		halvingCount := tc.height / halvingBlock
+		halvingCount := (tc.height + halvingOffset) / halvingBlock
 		baseRewardPerBlock, _ := new(big.Int).SetString(baseRewardPerBlockString, 10)
 		miningReward := new(big.Int).Div(baseRewardPerBlock, new(big.Int).Exp(big.NewInt(2), big.NewInt(int64(halvingCount)), nil))
 		fmt.Println("height", tc.height, "halvingCount:", halvingCount, "miningReward:", miningReward.String())
