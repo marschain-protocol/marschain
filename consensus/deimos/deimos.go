@@ -61,7 +61,7 @@ const (
 
 	baseRewardPerBlockString = "7750496031750000000000" // Marschain reward per block before first halving
 	halvingBlock             = int64(28800 * 448)       // Marschain reward halving every 448 days, 28800 blocks per day
-	halvingOffset            = int64(77420)             // Marschain halving block offset, 600,000,000(allocated in genesis block) / baseRewardPerBlockString
+	halvingOffset            = int64(79192)             // Marschain halving block offset, 613,777,281.746346(allocated in genesis block) / baseRewardPerBlockString
 )
 
 var (

@@ -13,7 +13,7 @@ import (
 func TestRewardHalving(t *testing.T) {
 	baseRewardPerBlockString := "7750496031750000000000"
 	halvingBlock := int64(28800 * 448)
-	halvingOffset := int64(77420)
+	halvingOffset := int64(79192)
 
 	testCases := []struct {
 		height int64
